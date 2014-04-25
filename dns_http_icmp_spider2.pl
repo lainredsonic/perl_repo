@@ -35,7 +35,7 @@ $path = "/" if($path eq "");
 
 my ($host_ip, $dns_latency, $dns_success) = &p_dns($host);
 if($dns_success){
-	print "$host_ip $dns_latency\n"
+	print "$host_ip $dns_latency\n";
 }else{
 	die "dns failed\n";
 }
@@ -45,7 +45,7 @@ my $content;
 
 my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content);
 if ($http_success){
-	print $content," ",$http_latency,"\n" if $http_success;
+	print $content," ",$http_latency,"\n";
 }else{
 	die "http failed\n";
 }
@@ -116,13 +116,15 @@ sub p_http{
 	}else{
 		$success=1;
 		if ($code == 301 and $mess eq "Moved Permanently"){
-			my $location = $h{'Location'};
-			if($location =~ /^https{0,1}:\/\//){
-				$location = $';
-				chop($location);
+			my $location = $h{'location'};
+			my $Location = $h{'Location'};
+			if(defined $Location and $Location =~ /^https{0,1}:\/\/([a-zA-Z_\-\.]*)/){
+				$Location = $1;
+				&p_http($peer, $Location, $path, $ua, $content);
+			}else{
+				$location ="/".$location;
+				&p_http($peer, $host, $location, $ua, $content);
 			}
-			print "$location\n";
-			&p_http($peer, $location, $path, $ua, $content);
 		}
 	}
 	my $latency = gettimeofday - $start_time;
