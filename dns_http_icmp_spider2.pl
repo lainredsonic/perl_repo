@@ -2,6 +2,7 @@
 
 use warnings;
 use strict;
+use 5.010;
 
 use URI;
 use LWP;
@@ -12,8 +13,8 @@ use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
 
-#use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
-my $UA_CHROME = "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
+use constant MAX_REL		=> 5;
+use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
 
@@ -48,16 +49,29 @@ print "ICMP: $icmp_latency\n" if $icmp_success;
 ##################################################
 
 ################## HTTP portal ###################
-my $ua = $UA_CHROME;
+#my $ua = $UA_CHROME;
+my $ua = UA_CHROME;
+
 my $content;
 
 my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content);
 if ($http_success){
-#	print $content," ",$http_latency,"\n";
+#	print "HTTP_PORTAL: $content,$http_latency\n";
 	print "HTTP_PORTAL: $http_latency\n";
 }else{
 	die "http failed\n";
 }
+##################################################
+
+################# HTTP 2 #########################
+
+my ($http2_success, $http2_latency) = &p_http_2(\$content, $ua);
+if ($http_success){
+	print "HTTP_FLOW: $http2_latency\n";
+}else{
+	die "http flow failed\n";
+}
+
 ##################################################
 
 sub p_dns {
@@ -99,6 +113,12 @@ sub p_dns {
 sub p_http{
 	my ($peer, $host, $path, $ua, $content) = @_;
 	my $success = 0;
+	state $depth = 0;
+	if ($depth > MAX_REL){
+		warn "maxium relocation reached\n";
+		return;
+	}
+	$depth++;
 	my $start_time = gettimeofday;
 	my ($browser, $code, $mess, %h);
 	eval {
@@ -153,4 +173,44 @@ sub p_icmp{
 	}
 	$icmp_client->close();
 	($duration, $success);
+}
+
+sub p_http_2{
+	my $content = ${$_[0]};
+	my $ua = $_[1];
+	my $success = 0;
+	my $parser = HTML::LinkExtor->new();
+	$parser->parse($content)->eof;
+	my @links = $parser->links;
+	my @res;
+	
+	foreach (@links){
+		my @element = @$_;
+		my $elt_type = shift @element;
+		next if ($elt_type !~ /img|script/);
+		my ($attr_name, $attr_value) = splice(@element, 0, 2);
+		if($attr_name eq "src"){
+#			next if($attr_value eq $base_url);
+#			$attr_value = "http://".$base_url.$attr_value;
+#				if($attr_value !~ /^http/);
+			push (@res, $attr_value);
+		}
+	}
+	
+	my $bua = LWP::UserAgent->new();
+	$bua->agent($ua);
+	$bua->timeout(3);
+
+	my $thread = Parallel::ForkManager->new(20);
+	my $start_time = gettimeofday;
+	foreach(@res){
+		$thread->start and next;
+		my $status = $bua->get($_)->status_line;
+		print "status: $status $_\n";
+		$thread->finish;
+	}
+	$thread->wait_all_children;
+	$success = 1;
+	my $latency = gettimeofday-$start_time;
+	($success, $latency);
 }
