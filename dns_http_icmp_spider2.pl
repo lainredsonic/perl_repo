@@ -7,6 +7,7 @@ use URI;
 use LWP;
 use Net::DNS;
 use Net::HTTP;
+use Net::Ping;
 use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
@@ -32,23 +33,32 @@ if ($@){
 
 $path = "/" if($path eq "");
 
-
+################## DNS query #####################
 my ($host_ip, $dns_latency, $dns_success) = &p_dns($host);
 if($dns_success){
-	print "$host_ip $dns_latency\n";
+	print "DNS: $host_ip $dns_latency\n";
 }else{
 	die "dns failed\n";
 }
+##################################################
 
+################## ICMP test #####################
+my ($icmp_latency, $icmp_success) = &p_icmp($host_ip);
+print "ICMP: $icmp_latency\n" if $icmp_success;
+##################################################
+
+################## HTTP portal ###################
 my $ua = $UA_CHROME;
 my $content;
 
 my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content);
 if ($http_success){
-	print $content," ",$http_latency,"\n";
+#	print $content," ",$http_latency,"\n";
+	print "HTTP_PORTAL: $http_latency\n";
 }else{
 	die "http failed\n";
 }
+##################################################
 
 sub p_dns {
 	my $host = $_[0];
@@ -120,8 +130,10 @@ sub p_http{
 			my $Location = $h{'Location'};
 			if(defined $Location and $Location =~ /^https{0,1}:\/\/([a-zA-Z_\-\.]*)/){
 				$Location = $1;
+				warn "Location: $Location\n";
 				&p_http($peer, $Location, $path, $ua, $content);
 			}else{
+				warn "location: $location\n";
 				$location ="/".$location;
 				&p_http($peer, $host, $location, $ua, $content);
 			}
@@ -129,4 +141,16 @@ sub p_http{
 	}
 	my $latency = gettimeofday - $start_time;
 	($latency, $success);
+}
+
+sub p_icmp{
+	my $icmp_client = Net::Ping->new('icmp');
+	my $success = 0;
+	$icmp_client->hires();
+	my ($ret, $duration, $ip) = $icmp_client->ping($_[0], 3);
+	if ($ret){
+		$success = 1;
+	}
+	$icmp_client->close();
+	($duration, $success);
 }
