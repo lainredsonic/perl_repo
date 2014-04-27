@@ -66,7 +66,7 @@ if ($http_success){
 
 ################# HTTP 2 #########################
 
-my ($http2_success, $http2_latency) = &p_http_2(\$content, $ua);
+my ($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
 if ($http_success){
 	print "HTTP_FLOW: $http2_latency\n";
 }else{
@@ -179,6 +179,7 @@ sub p_icmp{
 sub p_http_2{
 	my $content = ${$_[0]};
 	my $ua = $_[1];
+	my $base_host = $_[2];
 	my $success = 0;
 	my $parser = HTML::LinkExtor->new();
 	$parser->parse($content)->eof;
@@ -191,15 +192,7 @@ sub p_http_2{
 		next if ($elt_type !~ /img|script/);
 		my ($attr_name, $attr_value) = splice(@element, 0, 2);
 		if($attr_name eq "src"){
-#			next if($attr_value eq $base_url);
-#			$attr_value = "http://".$base_url.$attr_value;
-#				if($attr_value !~ /^http/);
 			push (@res, $attr_value);
-=head
-			foreach (@res){
-				print "$_\n";
-			}
-=cut
 		}
 	}
 
@@ -209,7 +202,9 @@ sub p_http_2{
 			my $src_host = $1;
 			$g_res{$src_host} .= "$_ ";
 		}else{
-			print "not grouped $_\n";
+#			print "not grouped: $_\n";
+			my $src_host = "http://".$base_host."/".$_;
+			$g_res{$base_host} .= "$src_host ";
 		}
 	}
 
