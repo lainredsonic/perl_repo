@@ -142,7 +142,7 @@ sub p_http{
 		}
 	};
 	if ($@){
-		warn "http request failed\n"; 
+		warn "http request failed: $@\n"; 
 	}else{
 		$success=1;
 		if ($code == 301 and $mess eq "Moved Permanently"){
@@ -197,7 +197,7 @@ sub p_http_2{
 		}
 	}
 	
-	my $bua = LWP::UserAgent->new();
+	my $bua = LWP::UserAgent->new('keep_alive' => 20);
 	$bua->agent($ua);
 	$bua->timeout(3);
 
