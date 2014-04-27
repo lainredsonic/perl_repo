@@ -14,6 +14,7 @@ use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
 
 use constant MAX_REL		=> 5;
+use constant RECV_TIMEOUT	=> 3;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
@@ -136,8 +137,14 @@ sub p_http{
 				);
 		($code, $mess, %h) = $browser->read_response_headers;
 		while (1){
+			my $n;
 			my $buf;
-			my $n = $browser->read_entity_body($buf, 1024);
+			eval {
+				local $SIG{ALRM} = sub { warn "receive p_http timeout\n"; };
+				alarm RECV_TIMEOUT;
+				$n = $browser->read_entity_body($buf, 1024);
+				alarm 0;
+			};
 			last unless $n;
 			$$content .= $buf;
 		}
@@ -171,6 +178,8 @@ sub p_icmp{
 	my ($ret, $duration, $ip) = $icmp_client->ping($_[0], 3);
 	if ($ret){
 		$success = 1;
+	}else{
+		warn "ICMP failed\n";
 	}
 	$icmp_client->close();
 	($duration, $success);
@@ -221,8 +230,13 @@ sub p_http_2{
 		my @link = split(/ /,$g_res{$_});
 		$thread->start and next;
 		foreach (@link){
-			my $status = $bua->get($_)->status_line;
-			print "status: $status $_\n";
+			eval {
+				local $SIG{ALRM} = sub { warn "receive p_http_2 timeout\n"; };
+				alarm RECV_TIMEOUT;
+				my $status = $bua->get($_)->status_line;
+				print "status: $status $_\n";
+				alarm 0;
+			};
 		}
 		$thread->finish;
 	}
