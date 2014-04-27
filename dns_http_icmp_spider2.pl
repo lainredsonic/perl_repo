@@ -14,6 +14,7 @@ use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
 
 use constant MAX_REL		=> 5;
+use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
@@ -148,7 +149,7 @@ sub p_http{
 		if ($code == 301 and $mess eq "Moved Permanently"){
 			my $location = $h{'location'};
 			my $Location = $h{'Location'};
-			if(defined $Location and $Location =~ /^https{0,1}:\/\/([a-zA-Z_\-\.]*)/){
+			if(defined $Location and $Location =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)/){
 				$Location = $1;
 				warn "Location: $Location\n";
 				&p_http($peer, $Location, $path, $ua, $content);
@@ -194,19 +195,40 @@ sub p_http_2{
 #			$attr_value = "http://".$base_url.$attr_value;
 #				if($attr_value !~ /^http/);
 			push (@res, $attr_value);
+=head
+			foreach (@res){
+				print "$_\n";
+			}
+=cut
 		}
 	}
-	
+
+	my %g_res;
+	foreach (@res){
+		if ($_ =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)\//){
+			my $src_host = $1;
+			$g_res{$src_host} .= "$_ ";
+		}else{
+			print "not grouped $_\n";
+		}
+	}
+
 	my $bua = LWP::UserAgent->new('keep_alive' => 20);
 	$bua->agent($ua);
 	$bua->timeout(3);
 
-	my $thread = Parallel::ForkManager->new(20);
+	my $thread = Parallel::ForkManager->new(MAX_HTTP_PIPO);
+
 	my $start_time = gettimeofday;
-	foreach(@res){
+
+	my @key = keys %g_res;
+	foreach (@key){
+		my @link = split(/ /,$g_res{$_});
 		$thread->start and next;
-		my $status = $bua->get($_)->status_line;
-		print "status: $status $_\n";
+		foreach (@link){
+			my $status = $bua->get($_)->status_line;
+			print "status: $status $_\n";
+		}
 		$thread->finish;
 	}
 	$thread->wait_all_children;
