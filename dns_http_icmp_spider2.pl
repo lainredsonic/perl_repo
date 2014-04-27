@@ -55,8 +55,9 @@ print "ICMP: $icmp_latency\n" if $icmp_success;
 my $ua = UA_CHROME;
 
 my $content;
+my $true_host;
 
-my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content);
+my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content, \$true_host);
 if ($http_success){
 #	print "HTTP_PORTAL: $content,$http_latency\n";
 	print "HTTP_PORTAL: $http_latency\n";
@@ -67,6 +68,7 @@ if ($http_success){
 
 ################# HTTP 2 #########################
 
+$host = $true_host if defined $true_host;
 my ($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
 if ($http_success){
 	print "HTTP_FLOW: $http2_latency\n";
@@ -113,7 +115,7 @@ sub p_dns {
 }
 
 sub p_http{
-	my ($peer, $host, $path, $ua, $content) = @_;
+	my ($peer, $host, $path, $ua, $content, $true_host) = @_;
 	my $success = 0;
 	state $depth = 0;
 	if ($depth > MAX_REL){
@@ -159,11 +161,12 @@ sub p_http{
 			if(defined $Location and $Location =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)/){
 				$Location = $1;
 				warn "Location: $Location\n";
-				&p_http($peer, $Location, $path, $ua, $content);
+				&p_http($peer, $Location, $path, $ua, $content, $true_host);
+				${$true_host} = $Location;
 			}else{
 				warn "location: $location\n";
 				$location ="/".$location;
-				&p_http($peer, $host, $location, $ua, $content);
+				&p_http($peer, $host, $location, $ua, $content, $true_host);
 			}
 		}
 	}
