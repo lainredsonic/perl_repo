@@ -9,7 +9,7 @@ use LWP;
 use Net::DNS;
 use Net::HTTP;
 use Net::Ping;
-use Net::Traceroute;
+use Net::Traceroute::PurePerl;
 use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
@@ -302,20 +302,19 @@ sub p_http_2{
 }
 
 sub p_traceroute{
-	my $tr = Net::Traceroute->new(host => $_[0]);
+	my $tr = Net::Traceroute::PurePerl->new(host => $_[0], max_ttl => 128, protocol => 'icmp', query_timeout => 2);
 	my $hops_list = $_[1];
+	$tr->traceroute;
 	if($tr->found){
 		my $hops = $tr->hops;
-		if($hops > 1){
-			my $i;
-			for($i=0; $i <= $hops; $i++){
-				my $ip = $tr->hop_query_host($i, 0);
-				$ip = "NULL" unless defined $ip;
-				if($i == $hops){
-					push(@{$hops_list}, "$ip\n");
-				}else{
-					push (@{$hops_list}, "$ip => ");
-				}
+		my $i;
+		for($i=1; $i <= $hops; $i++){
+			my $ip = $tr->hop_query_host($i, 0);
+			$ip = "NULL" unless defined $ip;
+			if($i == $hops){
+				push(@{$hops_list}, "$ip\n");
+			}else{
+				push (@{$hops_list}, "$ip => ");
 			}
 		}
 	}
