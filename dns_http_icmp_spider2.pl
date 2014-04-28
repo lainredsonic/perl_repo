@@ -13,6 +13,7 @@ use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
 
+use constant MAX_SESSION	=> 10;
 use constant MAX_REL		=> 5;
 use constant RECV_TIMEOUT	=> 3;
 use constant MAX_HTTP_PIPO	=> 10;
@@ -20,63 +21,105 @@ use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome S
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
 
-my $url = URI->new($ARGV[0]);
+open (FD, "<", $ARGV[0]) or die "cannot open file\n";
 
-my ($host, $path, $query);
+my @line = <FD>;
 
-eval {
-	$host = $url->host;
-	$path = $url->path;
-	$query = $url->query;
-};
+my $session = Parallel::ForkManager->new(MAX_SESSION);
+print "url|dns_latency|dns_success|host_ip|icmp_latency|icmp_success|http_latency|http_success|http2_latency\n";
 
-if ($@){
-	die "malform url\n";
+foreach (@line){
+	$session->start and next;
+	chomp($_);
+	&p_main($_);
+	$session->finish;
 }
 
-$path = "/" if($path eq "");
+$session->wait_all_children;
+
+
+
+sub p_main{
+	my $url = URI->new($_[0]);
+
+	my ($host, $path, $query);
+
+	eval {
+		$host = $url->host;
+		$path = $url->path;
+		$query = $url->query;
+	};
+
+	if ($@){
+		die "malform url\n";
+	}
+
+	my ($full_url,
+		$dns_latency, $dns_success, $host_ip, 
+		$icmp_latency, $icmp_success, 
+		$http_latency, $http_success, 
+		$http2_latency, $http2_success);
+
+	$full_url = $_[0];
+
+	$path = "/" if($path eq "");
 
 ################## DNS query #####################
-my ($host_ip, $dns_latency, $dns_success) = &p_dns($host);
-if($dns_success){
-	print "DNS: $host_ip $dns_latency\n";
-}else{
-	die "dns failed\n";
-}
+	($host_ip, $dns_latency, $dns_success) = &p_dns($host);
+=head
+	if($dns_success){
+		print "DNS: $host_ip $dns_latency\n";
+	}else{
+		die "dns failed\n";
+	}
+=cut
+	die "dns failed\n" unless $dns_success;
 ##################################################
 
 ################## ICMP test #####################
-my ($icmp_latency, $icmp_success) = &p_icmp($host_ip);
-print "ICMP: $icmp_latency\n" if $icmp_success;
+	($icmp_latency, $icmp_success) = &p_icmp($host_ip);
+#	print "ICMP: $icmp_latency\n" if $icmp_success;
 ##################################################
 
 ################## HTTP portal ###################
-#my $ua = $UA_CHROME;
-my $ua = UA_CHROME;
+	my $ua = UA_CHROME;
 
-my $content;
-my $true_host;
+	my $content;
+	my $true_host;
 
-my ($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content, \$true_host);
-if ($http_success){
+	($http_latency, $http_success) = &p_http($host_ip, $host, $path, $ua, \$content, \$true_host);
+=head
+	if ($http_success and defined $content){
 #	print "HTTP_PORTAL: $content,$http_latency\n";
-	print "HTTP_PORTAL: $http_latency\n";
-}else{
-	die "http failed\n";
-}
+		print "HTTP_PORTAL: $http_latency\n";
+	}else{
+		die "http failed\n";
+	}
+=cut
+	die "http failed\n" unless ($http_success);
 ##################################################
 
 ################# HTTP 2 #########################
 
-$host = $true_host if defined $true_host;
-my ($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
-if ($http_success){
-	print "HTTP_FLOW: $http2_latency\n";
-}else{
-	die "http flow failed\n";
-}
+	$host = $true_host if defined $true_host;
+	($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
+=head
+	if ($http2_success){
+		print "HTTP_FLOW: $http2_latency\n";
+	}else{
+		die "http flow failed\n";
+	}
+=cut
+	die "http flow failed\n" unless $http2_success;
 
 ##################################################
+
+	printf "%s|%.2f|%d|%s|%.2f|%d|%.2f|%d|%.2f\n", 
+		$full_url,$dns_latency,$dns_success,
+		$host_ip,$icmp_latency,$icmp_success,
+		$http_latency,$http_success,$http2_latency;
+}
+
 
 sub p_dns {
 	my $host = $_[0];
@@ -237,7 +280,7 @@ sub p_http_2{
 				local $SIG{ALRM} = sub { warn "receive p_http_2 timeout\n"; };
 				alarm RECV_TIMEOUT;
 				my $status = $bua->get($_)->status_line;
-				print "status: $status $_\n";
+#				print "status: $status $_\n";
 				alarm 0;
 			};
 		}
