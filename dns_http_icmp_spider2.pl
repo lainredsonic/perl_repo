@@ -9,6 +9,7 @@ use LWP;
 use Net::DNS;
 use Net::HTTP;
 use Net::Ping;
+use Net::Traceroute;
 use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
@@ -58,7 +59,7 @@ sub p_main{
 		$dns_latency, $dns_success, $host_ip, 
 		$icmp_latency, $icmp_success, 
 		$http_latency, $http_success, 
-		$http2_latency, $http2_success);
+		$http2_latency, $http2_success, @hops);
 
 	$full_url = $_[0];
 
@@ -114,12 +115,20 @@ sub p_main{
 
 ##################################################
 
+################# TRACEROUTE #####################
+	&p_traceroute($host_ip, \@hops);
+
+
+##################################################
 	printf "%s|%.2f|%d|%s|%.2f|%d|%.2f|%d|%.2f\n", 
 		$full_url,$dns_latency,$dns_success,
 		$host_ip,$icmp_latency,$icmp_success,
 		$http_latency,$http_success,$http2_latency;
-}
 
+	foreach (@hops){
+		print $_;
+	}
+}
 
 sub p_dns {
 	my $host = $_[0];
@@ -290,4 +299,24 @@ sub p_http_2{
 	$success = 1;
 	my $latency = gettimeofday-$start_time;
 	($success, $latency);
+}
+
+sub p_traceroute{
+	my $tr = Net::Traceroute->new(host => $_[0]);
+	my $hops_list = $_[1];
+	if($tr->found){
+		my $hops = $tr->hops;
+		if($hops > 1){
+			my $i;
+			for($i=0; $i <= $hops; $i++){
+				my $ip = $tr->hop_query_host($i, 0);
+				$ip = "NULL" unless defined $ip;
+				if($i == $hops){
+					push(@{$hops_list}, "$ip\n");
+				}else{
+					push (@{$hops_list}, "$ip => ");
+				}
+			}
+		}
+	}
 }
