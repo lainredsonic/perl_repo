@@ -20,6 +20,7 @@ use constant MAX_SESSION	=> 100;
 use constant MAX_REL		=> 5;
 use constant RECV_TIMEOUT	=> 10;
 use constant CONN_TIMEOUT	=> 10;
+use constant ICMP_TIMEOUT	=> 10;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
@@ -39,9 +40,10 @@ my $session = Parallel::ForkManager->new(MAX_SESSION);
 print "url|dns_latency|dns_success|host_ip|icmp_latency|icmp_success|http_latency|http_success|http2_latency\n";
 
 foreach (@line){
-	$session->start and next;
 	chomp($_);
+	next if ($_ =~ /^#/);
 	$_ = 'http://'.$_ if ($_ !~ /^http:\/\//);
+	$session->start and next;
 	&p_main($_);
 	$session->finish;
 }
@@ -128,7 +130,7 @@ sub p_main{
 ##################################################
 
 ################# TRACEROUTE #####################
-#	&p_traceroute($host_ip, \@hops);
+	&p_traceroute($host_ip, \@hops);
 
 
 ##################################################
@@ -181,6 +183,7 @@ sub p_dns {
 sub p_http{
 	my ($peer, $host, $path, $ua, $content, $true_host) = @_;
 	my $success = 0;
+	my $latency = 0;
 	state $depth = 0;
 	if ($depth > MAX_REL){
 		warnf "maxium relocation reached";
@@ -223,29 +226,27 @@ sub p_http{
 				alarm 0;
 			};
 			$success=1;
-=head
-		}elsif ($code == 301){
+		}elsif (defined $code and $code == 301){
 			my $location = $h{'location'};
 			my $Location = $h{'Location'};
 			if(defined $Location and $Location =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)/){
 				$Location = $1;
 				warnf "Location: $Location";
-				&p_http($peer, $Location, $path, $ua, $content, $true_host);
 				${$true_host} = $Location;
+				($latency, $success) = &p_http($peer, $Location, $path, $ua, $content, $true_host);
 			}elsif(defined $location and $location ne ""){
 				warnf "location: $location";
-				$location ="/".$location;
-				&p_http($peer, $host, $location, $ua, $content, $true_host);
+				$location = "/".$location;
+				($latency, $success) = &p_http($peer, $host, $location, $ua, $content, $true_host);
 			}else{
 				warnf "status 301, but unknown location";
 				$success=0;
 			}
-=cut
 		}else{
-			warnf "status can't process";
+			warnf "status $code can't process";
 		}
 	}
-	my $latency = gettimeofday - $start_time;
+	$latency = gettimeofday - $start_time;
 	($latency, $success);
 }
 
@@ -253,11 +254,11 @@ sub p_icmp{
 	my $icmp_client = Net::Ping->new('icmp');
 	my $success = 0;
 	$icmp_client->hires();
-	my ($ret, $duration, $ip) = $icmp_client->ping($_[0], 3);
+	my ($ret, $duration, $ip) = $icmp_client->ping($_[0], ICMP_TIMEOUT);
 	if ($ret){
 		$success = 1;
 	}else{
-		warnf "ICMP failed";
+		warnf "ICMP failed $_[0]";
 	}
 	$icmp_client->close();
 	($duration, $success);
@@ -313,7 +314,7 @@ sub p_http_2{
 				local $SIG{ALRM} = sub { warnf "receive p_http_2 timeout"; };
 				alarm RECV_TIMEOUT;
 				my $status = $bua->get($_)->status_line;
-#				print "status: $status $_\n";
+				infof "status: $status $_";
 				alarm 0;
 			};
 		}
