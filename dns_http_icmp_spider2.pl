@@ -14,7 +14,7 @@ use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
 
-use constant MAX_SESSION	=> 10;
+use constant MAX_SESSION	=> 100;
 use constant MAX_REL		=> 5;
 use constant RECV_TIMEOUT	=> 3;
 use constant MAX_HTTP_PIPO	=> 10;
@@ -32,6 +32,7 @@ print "url|dns_latency|dns_success|host_ip|icmp_latency|icmp_success|http_latenc
 foreach (@line){
 	$session->start and next;
 	chomp($_);
+	$_ = 'http://'.$_ if ($_ !~ /^http:\/\//);
 	&p_main($_);
 	$session->finish;
 }
@@ -215,10 +216,13 @@ sub p_http{
 				warn "Location: $Location\n";
 				&p_http($peer, $Location, $path, $ua, $content, $true_host);
 				${$true_host} = $Location;
-			}else{
+			}elsif(defined $location){
 				warn "location: $location\n";
 				$location ="/".$location;
 				&p_http($peer, $host, $location, $ua, $content, $true_host);
+			}else{
+				warn "status 301, but unknown location\n";
+				$success=0;
 			}
 		}
 	}
@@ -245,6 +249,7 @@ sub p_http_2{
 	my $ua = $_[1];
 	my $base_host = $_[2];
 	my $success = 0;
+	return (0, 0) if(!defined $content or $content eq "");
 	my $parser = HTML::LinkExtor->new();
 	$parser->parse($content)->eof;
 	my @links = $parser->links;
