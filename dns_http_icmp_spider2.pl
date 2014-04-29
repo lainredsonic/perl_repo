@@ -19,6 +19,7 @@ use Log::Minimal;
 use constant MAX_SESSION	=> 100;
 use constant MAX_REL		=> 5;
 use constant RECV_TIMEOUT	=> 10;
+use constant CONN_TIMEOUT	=> 10;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
@@ -119,6 +120,8 @@ sub p_main{
 	}else{
 		die "http flow failed\n";
 	}
+	$http2_success = 1;
+	$http2_latency = 1;
 =cut
 	die "######## http flow failed: $host\n" unless $http2_success;
 
@@ -186,37 +189,42 @@ sub p_http{
 	$depth++;
 	my $start_time = gettimeofday;
 	my ($browser, $code, $mess, %h);
-	eval {
-		$browser = Net::HTTP->new(
-				'PeerAddr' => $peer,
-				'Timeout' => 10,
-				'KeepAlive' => 0,
-				);
+	$browser = Net::HTTP->new(
+			'PeerAddr' => $peer,
+			'Timeout' => CONN_TIMEOUT,
+			'KeepAlive' => 0,
+			);
 
+	if (!defined $browser){
+		warnf "http connect failed: $@"; 
+	}else{
 		$browser->write_request(
 				'GET' => $path,
 				'User-Agent' => $ua,
 				'Host' => $host,
 				);
-		($code, $mess, %h) = $browser->read_response_headers;
-		while (1){
-			my $n;
-			my $buf;
+		eval {
+			local $SIG{ALRM} = sub { warnf "receive p_http header timeout"; die; };
+			alarm RECV_TIMEOUT;
+			($code, $mess, %h) = $browser->read_response_headers;
+			alarm 0;
+		};
+		if (defined $code and $code == 200){
 			eval {
-				local $SIG{ALRM} = sub { warnf "receive p_http timeout"; };
+				local $SIG{ALRM} = sub { warnf "receive p_http body timeout"; die; };
 				alarm RECV_TIMEOUT;
-				$n = $browser->read_entity_body($buf, 1024);
+				while (1){
+					my $n;
+					my $buf;
+					$n = $browser->read_entity_body($buf, 1024);
+					last unless $n;
+					$$content .= $buf;
+				}
 				alarm 0;
 			};
-			last unless $n;
-			$$content .= $buf;
-		}
-	};
-	if ($@){
-		warnf "http request failed: $@"; 
-	}else{
-		$success=1;
-		if ($code == 301 and $mess eq "Moved Permanently"){
+			$success=1;
+=head
+		}elsif ($code == 301){
 			my $location = $h{'location'};
 			my $Location = $h{'Location'};
 			if(defined $Location and $Location =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)/){
@@ -224,7 +232,7 @@ sub p_http{
 				warnf "Location: $Location";
 				&p_http($peer, $Location, $path, $ua, $content, $true_host);
 				${$true_host} = $Location;
-			}elsif(defined $location){
+			}elsif(defined $location and $location ne ""){
 				warnf "location: $location";
 				$location ="/".$location;
 				&p_http($peer, $host, $location, $ua, $content, $true_host);
@@ -232,6 +240,9 @@ sub p_http{
 				warnf "status 301, but unknown location";
 				$success=0;
 			}
+=cut
+		}else{
+			warnf "status can't process";
 		}
 	}
 	my $latency = gettimeofday - $start_time;
@@ -287,7 +298,7 @@ sub p_http_2{
 
 	my $bua = LWP::UserAgent->new('keep_alive' => 20);
 	$bua->agent($ua);
-	$bua->timeout(3);
+	$bua->timeout(CONN_TIMEOUT);
 
 	my $thread = Parallel::ForkManager->new(MAX_HTTP_PIPO);
 
