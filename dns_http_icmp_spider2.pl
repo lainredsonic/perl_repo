@@ -13,16 +13,24 @@ use Net::Traceroute::PurePerl;
 use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
+use File::Stamped;
+use Log::Minimal;
 
 use constant MAX_SESSION	=> 100;
 use constant MAX_REL		=> 5;
-use constant RECV_TIMEOUT	=> 3;
+use constant RECV_TIMEOUT	=> 10;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
 
 open (FD, "<", $ARGV[0]) or die "cannot open file\n";
+
+my $logf = File::Stamped->new(pattern => 'log_%Y%m%d.txt');
+local $Log::Minimal::PRINT = sub {
+	my($time, $type, $message, $trace) = @_;
+	print {$logf} "$time [$type] $message at $trace\n";
+};
 
 my @line = <FD>;
 
@@ -53,7 +61,7 @@ sub p_main{
 	};
 
 	if ($@){
-		die "malform url\n";
+		die "malform url $_[0]\n";
 	}
 
 	my ($full_url,
@@ -75,7 +83,7 @@ sub p_main{
 		die "dns failed\n";
 	}
 =cut
-	die "dns failed\n" unless $dns_success;
+	warnf "dns failed $host" unless $dns_success;
 ##################################################
 
 ################## ICMP test #####################
@@ -98,7 +106,7 @@ sub p_main{
 		die "http failed\n";
 	}
 =cut
-	die "http failed\n" unless ($http_success);
+	die "######## http failed: $host\n" unless ($http_success);
 ##################################################
 
 ################# HTTP 2 #########################
@@ -112,12 +120,12 @@ sub p_main{
 		die "http flow failed\n";
 	}
 =cut
-	die "http flow failed\n" unless $http2_success;
+	die "######## http flow failed: $host\n" unless $http2_success;
 
 ##################################################
 
 ################# TRACEROUTE #####################
-	&p_traceroute($host_ip, \@hops);
+#	&p_traceroute($host_ip, \@hops);
 
 
 ##################################################
@@ -151,7 +159,7 @@ sub p_dns {
 		$dns_query = $dns_client->query($host, "A");
 	};
 	if ($@){
-		warn "dns request failed\n"; 
+		return (0, 0, 0);
 	}
 
 	my $latency = gettimeofday - $start_time;
@@ -172,8 +180,8 @@ sub p_http{
 	my $success = 0;
 	state $depth = 0;
 	if ($depth > MAX_REL){
-		warn "maxium relocation reached\n";
-		return;
+		warnf "maxium relocation reached";
+		return (0, 0);
 	}
 	$depth++;
 	my $start_time = gettimeofday;
@@ -195,7 +203,7 @@ sub p_http{
 			my $n;
 			my $buf;
 			eval {
-				local $SIG{ALRM} = sub { warn "receive p_http timeout\n"; };
+				local $SIG{ALRM} = sub { warnf "receive p_http timeout"; };
 				alarm RECV_TIMEOUT;
 				$n = $browser->read_entity_body($buf, 1024);
 				alarm 0;
@@ -205,7 +213,7 @@ sub p_http{
 		}
 	};
 	if ($@){
-		warn "http request failed: $@\n"; 
+		warnf "http request failed: $@"; 
 	}else{
 		$success=1;
 		if ($code == 301 and $mess eq "Moved Permanently"){
@@ -213,15 +221,15 @@ sub p_http{
 			my $Location = $h{'Location'};
 			if(defined $Location and $Location =~ /^https{0,1}:\/\/([0-9a-zA-Z_\-\.]*)/){
 				$Location = $1;
-				warn "Location: $Location\n";
+				warnf "Location: $Location";
 				&p_http($peer, $Location, $path, $ua, $content, $true_host);
 				${$true_host} = $Location;
 			}elsif(defined $location){
-				warn "location: $location\n";
+				warnf "location: $location";
 				$location ="/".$location;
 				&p_http($peer, $host, $location, $ua, $content, $true_host);
 			}else{
-				warn "status 301, but unknown location\n";
+				warnf "status 301, but unknown location";
 				$success=0;
 			}
 		}
@@ -238,7 +246,7 @@ sub p_icmp{
 	if ($ret){
 		$success = 1;
 	}else{
-		warn "ICMP failed\n";
+		warnf "ICMP failed";
 	}
 	$icmp_client->close();
 	($duration, $success);
@@ -291,7 +299,7 @@ sub p_http_2{
 		$thread->start and next;
 		foreach (@link){
 			eval {
-				local $SIG{ALRM} = sub { warn "receive p_http_2 timeout\n"; };
+				local $SIG{ALRM} = sub { warnf "receive p_http_2 timeout"; };
 				alarm RECV_TIMEOUT;
 				my $status = $bua->get($_)->status_line;
 #				print "status: $status $_\n";
