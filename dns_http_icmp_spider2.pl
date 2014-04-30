@@ -9,7 +9,7 @@ use LWP;
 use Net::DNS;
 use Net::HTTP;
 use Net::Ping;
-use Net::Traceroute::PurePerl;
+use Net::Traceroute;
 use HTML::LinkExtor;
 use Parallel::ForkManager;
 use Time::HiRes qw(gettimeofday tv_interval);
@@ -23,6 +23,8 @@ use constant CONN_TIMEOUT	=> 10;
 use constant ICMP_TIMEOUT	=> 10;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
+use constant DNS_SERVER		=> qw(192.168.1.99 8.8.8.8);
+use constant DNS_TIMEOUT	=> 10;
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
 
@@ -86,7 +88,7 @@ sub p_main{
 		die "dns failed\n";
 	}
 =cut
-	warnf "dns failed $host" unless $dns_success;
+	die "######## dns failed $host\n" unless $dns_success;
 ##################################################
 
 ################## ICMP test #####################
@@ -115,17 +117,17 @@ sub p_main{
 ################# HTTP 2 #########################
 
 	$host = $true_host if defined $true_host;
-	($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
 =head
+	($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
 	if ($http2_success){
 		print "HTTP_FLOW: $http2_latency\n";
 	}else{
 		die "http flow failed\n";
 	}
+	die "######## http flow failed: $host\n" unless $http2_success;
+=cut
 	$http2_success = 1;
 	$http2_latency = 1;
-=cut
-	die "######## http flow failed: $host\n" unless $http2_success;
 
 ##################################################
 
@@ -153,11 +155,11 @@ sub p_dns {
 	my $dns_query;
 	eval {
 		$dns_client = Net::DNS::Resolver->new(
-				nameserver => [qw(8.8.8.8 8.8.4.4)],
+				nameserver => [DNS_SERVER],
 				recurse => 1,
 				retry => 3,
 				dnsrch => 0,
-				udp_timeout => 3,
+				udp_timeout => DNS_TIMEOUT,
 				debug	=> 0
 				);
 		$start_time = gettimeofday;
@@ -243,7 +245,7 @@ sub p_http{
 				$success=0;
 			}
 		}else{
-			warnf "status $code can't process";
+			warnf "status can't process";
 		}
 	}
 	$latency = gettimeofday - $start_time;
@@ -314,7 +316,7 @@ sub p_http_2{
 				local $SIG{ALRM} = sub { warnf "receive p_http_2 timeout"; };
 				alarm RECV_TIMEOUT;
 				my $status = $bua->get($_)->status_line;
-				infof "status: $status $_";
+#				infof "status: $status $_";
 				alarm 0;
 			};
 		}
@@ -327,9 +329,14 @@ sub p_http_2{
 }
 
 sub p_traceroute{
-	my $tr = Net::Traceroute::PurePerl->new(host => $_[0], max_ttl => 128, protocol => 'icmp', query_timeout => 2);
+	my $tr = Net::Traceroute->new(
+			host => $_[0],
+			max_ttl => 32,
+			use_tcp => 1,
+			query_timeout=> 5,
+			timeout => 60
+		);
 	my $hops_list = $_[1];
-	$tr->traceroute;
 	if($tr->found){
 		my $hops = $tr->hops;
 		my $i;
