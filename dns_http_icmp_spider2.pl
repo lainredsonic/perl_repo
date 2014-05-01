@@ -23,7 +23,7 @@ use constant CONN_TIMEOUT	=> 10;
 use constant ICMP_TIMEOUT	=> 10;
 use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
-use constant DNS_SERVER		=> qw(192.168.1.99 8.8.8.8);
+use constant DNS_SERVER		=> qw(192.168.13.1);
 use constant DNS_TIMEOUT	=> 10;
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
@@ -117,17 +117,17 @@ sub p_main{
 ################# HTTP 2 #########################
 
 	$host = $true_host if defined $true_host;
-=head
 	($http2_success, $http2_latency) = &p_http_2(\$content, $ua, $host);
+=head
 	if ($http2_success){
 		print "HTTP_FLOW: $http2_latency\n";
 	}else{
 		die "http flow failed\n";
 	}
-	die "######## http flow failed: $host\n" unless $http2_success;
-=cut
 	$http2_success = 1;
 	$http2_latency = 1;
+=cut
+	die "######## http flow failed: $host\n" unless $http2_success;
 
 ##################################################
 
@@ -155,7 +155,7 @@ sub p_dns {
 	my $dns_query;
 	eval {
 		$dns_client = Net::DNS::Resolver->new(
-				nameserver => [DNS_SERVER],
+				nameservers => [DNS_SERVER],
 				recurse => 1,
 				retry => 3,
 				dnsrch => 0,
@@ -332,9 +332,9 @@ sub p_traceroute{
 	my $tr = Net::Traceroute->new(
 			host => $_[0],
 			max_ttl => 32,
-			use_tcp => 1,
+			use_icmp => 1,
 			query_timeout=> 5,
-			timeout => 60
+			timeout => 120
 		);
 	my $hops_list = $_[1];
 	if($tr->found){
