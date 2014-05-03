@@ -4,6 +4,8 @@ use warnings;
 use strict;
 use 5.010;
 
+use libqqwry;
+use Encode;
 use URI;
 use LWP;
 use Net::DNS;
@@ -25,6 +27,8 @@ use constant MAX_HTTP_PIPO	=> 10;
 use constant UA_CHROME		=> "Mozilla/5.0 AppleWebKit (KHTML, like Gecko) Chrome Safari";
 use constant DNS_SERVER		=> qw(192.168.13.1);
 use constant DNS_TIMEOUT	=> 10;
+
+use constant F_IPLOC		=> './QQWry.Dat';
 
 die "usage: $0 <uri>\n" unless defined $ARGV[0];
 
@@ -70,7 +74,7 @@ sub p_main{
 	}
 
 	my ($full_url,
-		$dns_latency, $dns_success, $host_ip, 
+		$dns_latency, $dns_success, $host_ip, $host_locate, 
 		$icmp_latency, $icmp_success, 
 		$http_latency, $http_success, 
 		$http2_latency, $http2_success, @hops);
@@ -89,6 +93,8 @@ sub p_main{
 	}
 =cut
 	die "######## dns failed $host\n" unless $dns_success;
+
+	$host_locate = &ip_locate($host_ip);
 ##################################################
 
 ################## ICMP test #####################
@@ -136,14 +142,16 @@ sub p_main{
 
 
 ##################################################
-	printf "%s|%.2f|%d|%s|%.2f|%d|%.2f|%d|%.2f\n", 
+	print  "###################################################\n";
+	printf "%s|%.2f|%d|%s|%s|%.2f|%d|%.2f|%d|%.2f\n", 
 		$full_url,$dns_latency,$dns_success,
-		$host_ip,$icmp_latency,$icmp_success,
+		$host_ip,$host_locate,$icmp_latency,$icmp_success,
 		$http_latency,$http_success,$http2_latency;
 
 	foreach (@hops){
 		print $_;
 	}
+	print  "\n###################################################\n\n";
 }
 
 sub p_dns {
@@ -341,13 +349,37 @@ sub p_traceroute{
 		my $hops = $tr->hops;
 		my $i;
 		for($i=1; $i <= $hops; $i++){
+			my $locate='';
 			my $ip = $tr->hop_query_host($i, 0);
-			$ip = "NULL" unless defined $ip;
-			if($i == $hops){
-				push(@{$hops_list}, "$ip\n");
+			if(defined $ip and $ip ne ""){
+				$locate = &ip_locate($ip);
 			}else{
-				push (@{$hops_list}, "$ip => ");
+				$ip = "NULL";
+			}
+
+			my $ip_locate='';
+			if ($ip ne "NULL"){
+				$ip_locate = "$ip($locate)";
+			}else{
+				$ip_locate = $ip;
+			}
+
+			if($i == $hops){
+#				push(@{$hops_list}, "$ip($locate)\n");
+				push(@{$hops_list}, $ip_locate);
+			}else{
+#				push (@{$hops_list}, "$ip($locate) => ");
+				push (@{$hops_list}, "$ip_locate => ");
 			}
 		}
 	}
+}
+
+sub ip_locate{
+	my $addr1='-' x 1024;
+	my $addr2='-' x 1024;
+	libqqwry::_qqwry_get($addr1, $addr2, $_[0], F_IPLOC);
+	$addr1 = encode("utf-8", decode("gbk", $addr1));
+	$addr2 = encode("utf-8", decode("gbk", $addr2));
+	return $addr1.$addr2;
 }

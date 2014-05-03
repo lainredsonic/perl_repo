@@ -1,0 +1,12 @@
+Changes
+libqqwry.xs
+Makefile.PL
+MANIFEST
+ppport.h
+qqwry.c
+qqwry.h
+README
+t/libqqwry.t
+fallback/const-c.inc
+fallback/const-xs.inc
+lib/libqqwry.pm

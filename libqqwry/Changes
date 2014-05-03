@@ -1,0 +1,6 @@
+Revision history for Perl extension libqqwry.
+
+0.01  Thu May  1 14:57:34 2014
+	- original version; created by h2xs 1.23 with options
+		-O -n libqqwry libqqwry/qqwry.h
+
